@@ -1,11 +1,12 @@
 // SessionStart — hand every new tab the same starting point.
 
-import { CONFIG, HUMAN_SEAT, SEATS, TEAM_ROOM, detectIdentity, emit, formatEntries, memoryTail, recess, roomEntries, seatIdentity, standDown } from "./coord.mjs";
+import { CONFIG, HUMAN_SEAT, SEATS, TEAM_ROOM, detectIdentity, emit, formatEntries, memoryTail, recess, roomEntries, seatFor, seatIdentity, standDown } from "./coord.mjs";
 
 const recessState = recess();
 const recent = roomEntries(TEAM_ROOM).slice(-6);
-const seat = detectIdentity();
-const identity = seat ? seatIdentity(seat) : null;
+const agentId = detectIdentity();
+const seat = agentId ? seatFor(agentId) : null;
+const identity = agentId ? seatIdentity(agentId) : null;
 const teamSkill = CONFIG.teamSkill ?? `${CONFIG.project ?? "team"}-team`;
 const recessSkill = CONFIG.recessSkill ?? `${CONFIG.project ?? "team"}-recess`;
 
@@ -26,10 +27,10 @@ const lines = [
 
 if (identity)
 {
-    const memory = memoryTail(seat);
+    const memory = memoryTail(agentId);
     lines.push(
         "",
-        `You are ${identity.displayName} (${seat}).`,
+        `You are ${identity.displayName}${seat ? ` (seat ${seat})` : ` (${agentId})`}.`,
         ...(identity.personality ? [identity.personality] : []),
         ...(memory ? ["", "Your memory:", memory] : []),
     );

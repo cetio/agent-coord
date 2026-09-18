@@ -23,10 +23,9 @@ export const CANONICAL_ROOT = path.resolve(HERE, "..", "..");
 export const PROJECT_DIR = process.env.DEVIN_PROJECT_DIR ?? process.cwd();
 
 const DEFAULTS = {
-    humanSeat: process.env.USER ?? "user",
+    human: process.env.USER ?? "user",
     teamRoom: "general",
-    seats: [],
-    seatIdentities: {},
+    seats: {},
     teamSkill: null,
     recessSkill: null,
 };
@@ -34,24 +33,32 @@ const DEFAULTS = {
 export function config()
 {
     const cfg = readJson(path.join(PROJECT_DIR, ".devin", "coord.json"), {});
-    return { ...DEFAULTS, ...cfg };
+    const merged = { ...DEFAULTS, ...cfg };
+    // `seats` is the seat→identity map written by `coord init`
+    // ({ "b": "rose" }). A legacy array of seat ids still works.
+    if (Array.isArray(merged.seats))
+        merged.seats = Object.fromEntries(merged.seats.map((seat) => [seat, seat]));
+    return merged;
 }
 
 export const CONFIG = config();
 export const COORD_DIR = path.join(PROJECT_DIR, ".devin", "agent-coord", "state");
 export const TEAM_ROOM = CONFIG.teamRoom;
-export const SEATS = CONFIG.seats;
-export const HUMAN_SEAT = CONFIG.humanSeat;
+export const SEATS = Object.keys(CONFIG.seats);
+export const SEAT_IDENTITIES = CONFIG.seats;
+export const HUMAN_SEAT = CONFIG.human;
 export const STAND_DOWN_FILE = path.join(PROJECT_DIR, ".devin", "collaboration", "stand-down");
 export const RECESS_FILE = path.join(PROJECT_DIR, ".devin", "collaboration", "recess");
 export const AGENTS_HOME = path.join(CANONICAL_ROOT, "agents");
 
-// The seat→identity map lives in .devin/coord.json as seatIdentities:
-// { "jobs-a": "rose" }. The identity files (identity.md, memory/) are global —
-// a person is portable across workspaces.
-export function seatIdentity(seatId)
+// The seat→identity map is coord.json's `seats` ({ "b": "rose" }). On the bus
+// a session binds the identity name (AGENT_COORD_BOUND_AGENT), so a detected
+// agentId is usually already an identity — look it up directly first, then as
+// a seat. Identity files (identity.md, memory.md) are global: a person is
+// portable across workspaces.
+export function seatIdentity(seatOrIdentity)
 {
-    const name = CONFIG.seatIdentities?.[seatId] ?? seatId;
+    const name = SEAT_IDENTITIES[seatOrIdentity] ?? seatOrIdentity;
     const dir = path.join(AGENTS_HOME, name);
     if (!existsSync(dir))
         return null;
@@ -67,6 +74,16 @@ export function seatIdentity(seatId)
         personality,
         memoryFile: path.join(dir, "memory.md"),
     };
+}
+
+// The seat label for a detected agentId — reverse of the seats map. Returns
+// null when the agentId is an identity with no configured seat (roaming agent).
+export function seatFor(agentId)
+{
+    for (const [seat, name] of Object.entries(SEAT_IDENTITIES))
+        if (name === agentId)
+            return seat;
+    return SEATS.includes(agentId) ? agentId : null;
 }
 
 export function memoryTail(seatId, maxChars = 4000)
@@ -181,7 +198,8 @@ export function detectIdentity()
     const markers = readdirSync(dir)
         .filter((name) => name.endsWith(".json"))
         .map((name) => readJson(path.join(dir, name), null))
-        .filter((m) => m && (!SEATS.length || SEATS.includes(m.agentId)));
+        .filter((m) => m && (!SEATS.length ||
+            SEATS.includes(m.agentId) || Object.values(SEAT_IDENTITIES).includes(m.agentId)));
     if (!markers.length)
         return null;
     const ancestry = ancestorChain(process.pid, 6);

@@ -210,10 +210,14 @@ function cmdInit(workspace, flags)
     const port = allocPort(project);
     const coord = {
         project,
+        chatPort: port,
         port,
         human: flags.human ?? process.env.USER ?? "cet",
+        humanSeat: flags.human ?? process.env.USER ?? "cet",
         teamRoom: "general",
         seats,
+        teamSkill: `${project}-team`,
+        recessSkill: `${project}-recess`,
         coordRoot: ROOT,
     };
     writeJson(path.join(devin, "coord.json"), coord);
@@ -258,14 +262,16 @@ function cmdSeatAdd(workspace, spec)
     coord.seats[seat] = identity;
     writeJson(coordFile, coord);
     writeMcpSeat(workspace, seat, identity);
+    if (!existsSync(path.join(AGENTS_DIR, identity)))
+        cmdIdentityAdd(identity, {});
     console.log(`coord: seat ${seat} → ${identity} in ${coord.project}`);
 }
 
 function portOf(workspace)
 {
     const coord = coordJsonOf(workspace);
-    if (coord?.port)
-        return coord.port;
+    if (coord?.chatPort ?? coord?.port)
+        return coord.chatPort ?? coord.port;
     return allocPort(coord?.project ?? path.basename(workspace));
 }
 
@@ -293,7 +299,7 @@ function cmdChat(action, workspace, flags)
         fail(`chat ${action} needs a workspace dir`);
     const coord = coordJsonOf(workspace) ?? {};
     const project = coord.project ?? path.basename(workspace);
-    const port = Number(flags.port ?? coord.port ?? allocPort(project));
+    const port = Number(flags.port ?? coord.chatPort ?? coord.port ?? allocPort(project));
     const logFile = path.join(stateDirOf(workspace), "chat-server.log");
     mkdirSync(stateDirOf(workspace), { recursive: true });
 
