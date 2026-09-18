@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Terminal seat on the jobs bus (the coord package's own TUI), for when a
+# browser is not what you want. Same room, same messages, same seat id.
+#
+#   tools/coord-chat            join as $USER
+#   tools/coord-chat --id cet   join under an explicit seat id
+#
+# Inside: plain text posts to the current channel; /dm <seat> <text> for a
+# direct message; /rooms, /list, /topic, /doctor, /help for the rest.
+
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+state="$root/.devin/agent-coord/state"
+tui="$root/.devin/agent-coord/node_modules/agent-coord-mcp/scripts/coord-chat.mjs"
+
+if [ ! -f "$tui" ]; then
+    echo "coord-chat is missing — run: npm ci --ignore-scripts --prefix $root/.devin/agent-coord" >&2
+    exit 1
+fi
+
+mkdir -p "$state"
+export AGENT_COORD_DIR="$state"
+
+exec node "$tui" --dir "$state" "$@"

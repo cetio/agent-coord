@@ -1,0 +1,47 @@
+// UserPromptSubmit — surface what happened on the bus while this tab was busy.
+//
+// Reads only. Cursors stay where the agent left them, so the same traffic is
+// still waiting in read_messages; this is a nudge, not a delivery.
+
+import { CONFIG, HUMAN_SEAT, TEAM_ROOM, detectIdentity, emit, formatEntries, recess, standDown, unread } from "./coord.mjs";
+
+const seat = detectIdentity();
+const { dms, room } = unread(seat);
+const recessState = recess();
+const recessSkill = CONFIG.recessSkill ?? `${CONFIG.project ?? "team"}-recess`;
+const lines = [];
+
+if (seat)
+    lines.push(`You are ${seat}. Team room: #${TEAM_ROOM}.`);
+
+if (recessState.active)
+{
+    lines.push(
+        `A RECESS is open (called by ${recessState.by}${recessState.note ? `: ${recessState.note}` : ""}).`,
+        `Invoke the ${recessSkill} skill and follow it: announce yourself in the room, keep talking, minimal edits.`
+    );
+}
+else if (standDown())
+    lines.push("Stand-down is active — turns may end normally.");
+
+if (dms.length)
+{
+    lines.push(`Unread direct messages (${dms.length}) — read_messages inbox when you get a turn:`);
+    lines.push(formatEntries(dms, 6));
+}
+
+if (room.length)
+{
+    lines.push(`New #${TEAM_ROOM} traffic since your last read (${room.length}):`);
+    lines.push(formatEntries(room, 8));
+}
+
+if (lines.length === (seat ? 1 : 0))
+    lines.push(`Nothing new on the bus. ${HUMAN_SEAT} still decides scope — if this prompt changes it, put it in the room.`);
+
+emit({
+    hookSpecificOutput: {
+        hookEventName: "UserPromptSubmit",
+        additionalContext: lines.join("\n"),
+    },
+});

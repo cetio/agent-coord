@@ -1,0 +1,395 @@
+#!/usr/bin/env node
+// coord — the one script for team coordination.
+//
+//   coord init <workspace> [--project name] [--seats b:rose,c:jane,...]
+//       Wire a workspace for coordination: state dir, mcp_config seat entries,
+//       chat+hooks symlinks to the canonical repo, COORDINATION.md/ORGANICS.md
+//       copies (never clobbered), AGENTS.md managed block, port allocation.
+//
+//   coord seat add <workspace> <seat>:<identity>
+//       Add one more seat's MCP entry + seat→identity mapping.
+//
+//   coord chat start|stop|status|restart <workspace> [--port N]
+//       Run the canonical chat server against the workspace's bus.
+//
+//   coord update <workspace>
+//       Re-verify symlinks and templates; warn on divergent stray copies.
+//
+//   coord identity add <name> [--display "Display Name"]
+//       Scaffold a global identity: agents/<name>/identity.md + memory.md.
+//
+// Everything is self-fulfilling: seats only need their name and seat letter;
+// identity, memory, and display names come from the canonical registry.
+
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync, readdirSync, lstatSync, readlinkSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const CORE_CHAT = path.join(ROOT, "core", "chat");
+const CORE_HOOKS = path.join(ROOT, "core", "hooks");
+const CORE_TOOLS = path.join(ROOT, "core", "tools");
+const AGENTS_DIR = path.join(ROOT, "agents");
+const TEMPLATES = path.join(ROOT, "templates");
+const PORTS_FILE = path.join(ROOT, "ports.json");
+const SERVER_JS = path.join(ROOT, "node_modules", "agent-coord-mcp", "dist", "server.js");
+const AGENTS_BLOCK_BEGIN = "<!-- devin-coord:begin -->";
+const AGENTS_BLOCK_END = "<!-- devin-coord:end -->";
+
+function fail(msg)
+{
+    console.error(`coord: ${msg}`);
+    process.exit(1);
+}
+
+function parseFlags(argv)
+{
+    const ret = { _: [] };
+    for (let i = 0; i < argv.length; i++)
+    {
+        const arg = argv[i];
+        if (!arg.startsWith("--"))
+        {
+            ret._.push(arg);
+            continue;
+        }
+        const match = /^--([^=]+)(?:=(.*))?$/.exec(arg);
+        if (match)
+            ret[match[1]] = match[2] ?? argv[++i];
+    }
+    return ret;
+}
+
+function readJson(file, fallback)
+{
+    try { return JSON.parse(readFileSync(file, "utf8")); }
+    catch { return fallback; }
+}
+
+function writeJson(file, data)
+{
+    writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+}
+
+function ports()
+{
+    return readJson(PORTS_FILE, { allocations: {} });
+}
+
+function allocPort(project)
+{
+    const table = ports();
+    table.allocations ??= {};
+    if (table.allocations)
+    {
+        for (const [port, owner] of Object.entries(table.allocations))
+            if (owner === project)
+                return Number(port);
+    }
+    const used = new Set(Object.keys(table.allocations).map(Number));
+    let port = 7777;
+    while (used.has(port))
+        port++;
+    table.allocations[String(port)] = project;
+    writeJson(PORTS_FILE, table);
+    return port;
+}
+
+function ensureLink(target, link)
+{
+    if (lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink())
+    {
+        if (readlinkSync(link) === target)
+            return "ok";
+        unlinkSync(link);
+    }
+    else if (existsSync(link))
+        return "exists";
+    mkdirSync(path.dirname(link), { recursive: true });
+    symlinkSync(target, link);
+    return "linked";
+}
+
+function stateDirOf(workspace)
+{
+    return path.join(workspace, ".devin", "agent-coord", "state");
+}
+
+function coordJsonOf(workspace)
+{
+    return readJson(path.join(workspace, ".devin", "coord.json"), null);
+}
+
+function seatEntry(workspace, identity)
+{
+    return {
+        command: "node",
+        args: [SERVER_JS],
+        env: {
+            AGENT_COORD_DIR: stateDirOf(workspace),
+            AGENT_COORD_BOUND_AGENT: identity,
+        },
+    };
+}
+
+function writeMcpSeat(workspace, seat, identity)
+{
+    const file = path.join(workspace, ".devin", "mcp_config.json");
+    const config = readJson(file, { mcpServers: {} });
+    config.mcpServers ??= {};
+    config.mcpServers[`agent-coord-${seat}`] = seatEntry(workspace, identity);
+    writeJson(file, config);
+}
+
+function appendAgentsBlock(workspace, project)
+{
+    const file = path.join(workspace, "AGENTS.md");
+    const block = `
+${AGENTS_BLOCK_BEGIN}
+
+## Team coordination
+
+This workspace runs a coordinated agent team. Read **COORDINATION.md** (how the
+room works: bus, rooms, seats, recess) and **ORGANICS.md** (team personality —
+how to act like a person here, not a process). Both are workspace copies; edit
+ORGANICS.md to tune this team's default behavior.
+
+- The bus is \`.devin/agent-coord/state/\` via the \`agent-coord-<seat>\` MCP server.
+- Your seat and identity are in \`.devin/coord.json\`; your memory lives in the
+  canonical repo at \`agents/<you>/\` — read it at session start, add to it before
+  you stop.
+- The team chat UI: \`coord chat start ${project}\` then open the printed URL.
+
+${AGENTS_BLOCK_END}
+`;
+    let current = existsSync(file) ? readFileSync(file, "utf8") : "";
+    if (current.includes(AGENTS_BLOCK_BEGIN))
+    {
+        const re = new RegExp(`${AGENTS_BLOCK_BEGIN}[\\s\\S]*?${AGENTS_BLOCK_END}`);
+        current = current.replace(re, block.trim());
+    }
+    else
+        current = `${current.trimEnd()}\n\n${block.trim()}\n`;
+    writeFileSync(file, current, "utf8");
+}
+
+function copyTemplate(name, workspace)
+{
+    const src = path.join(TEMPLATES, name);
+    const dest = path.join(workspace, name);
+    if (!existsSync(src))
+        return "missing-template";
+    if (existsSync(dest))
+        return "kept-local";
+    writeFileSync(dest, readFileSync(src, "utf8"), "utf8");
+    return "copied";
+}
+
+function cmdInit(workspace, flags)
+{
+    if (!workspace)
+        fail("init needs a workspace dir");
+    mkdirSync(workspace, { recursive: true });
+    const project = flags.project ?? path.basename(workspace);
+    const devin = path.join(workspace, ".devin");
+    for (const dir of ["agent-coord/state", "collaboration", "agents"])
+        mkdirSync(path.join(devin, dir), { recursive: true });
+
+    const seats = {};
+    const seatSpec = flags.seats ?? "";
+    for (const pair of String(seatSpec).split(","))
+    {
+        const [seat, identity] = pair.split(":").map((part) => part?.trim());
+        if (seat && identity)
+            seats[seat] = identity;
+    }
+    if (!Object.keys(seats).length)
+        console.error("note: no --seats given; add later with `coord seat add <ws> <seat>:<identity>`");
+
+    const port = allocPort(project);
+    const coord = {
+        project,
+        port,
+        human: flags.human ?? process.env.USER ?? "cet",
+        teamRoom: "general",
+        seats,
+        coordRoot: ROOT,
+    };
+    writeJson(path.join(devin, "coord.json"), coord);
+
+    for (const [seat, identity] of Object.entries(seats))
+        writeMcpSeat(workspace, seat, identity);
+
+    const chatLink = ensureLink(CORE_CHAT, path.join(devin, "chat"));
+    const hooksLink = ensureLink(CORE_HOOKS, path.join(devin, "hooks"));
+    const toolsLink = ensureLink(CORE_TOOLS, path.join(workspace, "tools", "coord"));
+
+    const coordMd = copyTemplate("COORDINATION.md", workspace);
+    const organics = copyTemplate("ORGANICS.md", workspace);
+    appendAgentsBlock(workspace, project);
+
+    // hooks.v1.json is generated pointing at the canonical hooks — it is the
+    // wiring, the hook code itself comes through the symlink.
+    const hooksConfig = path.join(devin, "hooks.v1.json");
+    if (!existsSync(hooksConfig) && existsSync(path.join(TEMPLATES, "hooks.v1.json")))
+        writeFileSync(hooksConfig, readFileSync(path.join(TEMPLATES, "hooks.v1.json"), "utf8"), "utf8");
+
+    console.log(`coord: wired '${project}' (${workspace})`);
+    console.log(`  port:        ${port} (ports.json)`);
+    console.log(`  seats:       ${JSON.stringify(seats)}`);
+    console.log(`  chat link:   ${chatLink}`);
+    console.log(`  hooks link:  ${hooksLink}`);
+    console.log(`  tools link:  ${toolsLink}`);
+    console.log(`  COORDINATION.md: ${coordMd}   ORGANICS.md: ${organics}`);
+    console.log(`  next: coord chat start ${workspace}`);
+}
+
+function cmdSeatAdd(workspace, spec)
+{
+    if (!workspace || !spec)
+        fail("seat add needs <workspace> and <seat>:<identity>");
+    const [seat, identity] = spec.split(":").map((part) => part?.trim());
+    if (!seat || !identity)
+        fail("seat spec must look like b:rose");
+    const coordFile = path.join(workspace, ".devin", "coord.json");
+    const coord = readJson(coordFile, null) ?? fail(`no .devin/coord.json in ${workspace} — run coord init first`);
+    coord.seats ??= {};
+    coord.seats[seat] = identity;
+    writeJson(coordFile, coord);
+    writeMcpSeat(workspace, seat, identity);
+    console.log(`coord: seat ${seat} → ${identity} in ${coord.project}`);
+}
+
+function portOf(workspace)
+{
+    const coord = coordJsonOf(workspace);
+    if (coord?.port)
+        return coord.port;
+    return allocPort(coord?.project ?? path.basename(workspace));
+}
+
+function listenerPid(port)
+{
+    try
+    {
+        const out = execFileSync("ss", ["-tlnpH"], { encoding: "utf8" });
+        for (const line of out.split("\n"))
+        {
+            if (!line.includes(`:${port}`))
+                continue;
+            const match = /pid=(\d+)/.exec(line);
+            if (match)
+                return match[1];
+        }
+    }
+    catch { }
+    return null;
+}
+
+function cmdChat(action, workspace, flags)
+{
+    if (!workspace)
+        fail(`chat ${action} needs a workspace dir`);
+    const coord = coordJsonOf(workspace) ?? {};
+    const project = coord.project ?? path.basename(workspace);
+    const port = Number(flags.port ?? coord.port ?? allocPort(project));
+    const logFile = path.join(stateDirOf(workspace), "chat-server.log");
+    mkdirSync(stateDirOf(workspace), { recursive: true });
+
+    if (action === "status")
+    {
+        const pid = listenerPid(port);
+        console.log(pid ? `chat UP on :${port} (pid ${pid})` : `chat DOWN on :${port}`);
+        return;
+    }
+    if (action === "stop" || action === "restart")
+    {
+        const pid = listenerPid(port);
+        if (pid)
+        {
+            try { process.kill(Number(pid)); } catch { }
+            console.log(`killed pid ${pid} on :${port}`);
+        }
+        if (action === "stop")
+            return;
+    }
+    if (action === "start" || action === "restart")
+    {
+        const env = {
+            ...process.env,
+            DEVIN_PROJECT_DIR: workspace,
+            AGENT_COORD_DIR: stateDirOf(workspace),
+            COORD_CHAT_PORT: String(port),
+            COORD_PROJECT: project,
+            COORD_CHAT_ID: coord.human ?? process.env.USER ?? "cet",
+        };
+        const child = spawn("bash", ["-c",
+            `while true; do node "${path.join(CORE_CHAT, "server.mjs")}" >> "${logFile}" 2>&1; echo "[respawn] exited $(date -Iseconds)" >> "${logFile}"; sleep 1; done`],
+            { detached: true, stdio: "ignore", env });
+        child.unref();
+        console.log(`chat started for '${project}' on http://127.0.0.1:${port} (log ${logFile})`);
+    }
+}
+
+function cmdUpdate(workspace)
+{
+    const devin = path.join(workspace, ".devin");
+    const report = [];
+    for (const [name, target] of [["chat", CORE_CHAT], ["hooks", CORE_HOOKS]])
+    {
+        const link = path.join(devin, name);
+        const stat = lstatSync(link, { throwIfNoEntry: false });
+        if (!stat)
+            report.push(`${name}: MISSING (run coord init)`);
+        else if (stat.isSymbolicLink())
+            report.push(`${name}: linked → ${readlinkSync(link)}${readlinkSync(link) === target ? " (ok)" : " (STALE)"}`);
+        else
+            report.push(`${name}: real dir present — DIVERGED copy, diff against ${target} before removing`);
+    }
+    for (const doc of ["COORDINATION.md", "ORGANICS.md"])
+        report.push(`${doc}: ${existsSync(path.join(workspace, doc)) ? "present" : "missing (run coord init)"}`);
+    console.log(report.join("\n"));
+}
+
+function cmdIdentityAdd(name, flags)
+{
+    if (!name)
+        fail("identity add needs a name");
+    const dir = path.join(AGENTS_DIR, name);
+    mkdirSync(dir, { recursive: true });
+    const identityFile = path.join(dir, "identity.md");
+    if (!existsSync(identityFile))
+        writeFileSync(identityFile, `---\nname: ${name}\ndisplayName: ${flags.display ?? name}\ncolor: null\n---\n\n# ${flags.display ?? name}\n\nPersonality notes live here — how ${name} talks, what they care about, quirks worth keeping. Team-level defaults are in ORGANICS.md per workspace; this file is the person.\n`, "utf8");
+    const memoryFile = path.join(dir, "memory.md");
+    if (!existsSync(memoryFile))
+        writeFileSync(memoryFile, `# ${name} — memory\n\nAppend-only notebook. Sessions add what they learn; nothing here is workspace-specific — it follows the person.\n`, "utf8");
+    console.log(`identity '${name}' at ${dir}`);
+}
+
+const [cmd, sub, ...rest] = process.argv.slice(2);
+const flags = parseFlags(rest);
+const positional = [sub, ...flags._];
+
+switch (cmd)
+{
+    case "init": cmdInit(positional[0] ? path.resolve(positional[0]) : null, flags); break;
+    case "seat":
+        if (positional[0] !== "add")
+            fail("seat supports: add");
+        cmdSeatAdd(positional[1] ? path.resolve(positional[1]) : null, positional[2]);
+        break;
+    case "chat":
+        if (!["start", "stop", "status", "restart"].includes(positional[0] ?? ""))
+            fail("chat supports: start|stop|status|restart");
+        cmdChat(positional[0], positional[1] ? path.resolve(positional[1]) : null, flags);
+        break;
+    case "update": cmdUpdate(positional[0] ? path.resolve(positional[0]) : process.cwd()); break;
+    case "identity":
+        if (positional[0] !== "add")
+            fail("identity supports: add");
+        cmdIdentityAdd(positional[1], flags);
+        break;
+    default:
+        console.log(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 24).join("\n"));
+}

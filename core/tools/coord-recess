@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Call, close, or inspect the team's recess.
+#
+#   tools/coord-recess start "we need to argue about the data layer"
+#   tools/coord-recess end "what came out of it, who holds what next"
+#   tools/coord-recess status
+#
+# Starting one writes the marker the lifecycle hooks read and announces the
+# recess in #general. Any seat can call it; so can the user, from the chat UI.
+
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DEVIN_PROJECT_DIR="${DEVIN_PROJECT_DIR:-$root}"
+export COORD_SEAT="${COORD_SEAT:-${USER:-unknown}}"
+
+exec node "$root/.devin/chat/recess-cli.mjs" "$@"

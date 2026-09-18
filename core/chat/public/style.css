@@ -1,0 +1,498 @@
+:root
+{
+    --bg: #0d0d0d;
+    --panel: #111111;
+    --panel-2: #171717;
+    --panel-3: #1e1e1e;
+    --input-bg: #1a1a1a;
+    --line: #232323;
+    --line-2: #2e2e2e;
+    --text: #e6e6e6;
+    --dim: #8f8f8f;
+    --faint: #6b6b6b;
+    --accent: #3b82f6;
+    --accent-soft: rgba(59, 130, 246, 0.14);
+    --decision: #f59e0b;
+    --status: #22c55e;
+    --human: #ef4444;
+}
+
+* { box-sizing: border-box; }
+
+body
+{
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.5 Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+
+h1 { font-size: 14px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+
+/* Thin, unobtrusive scrollbars in the Devin/VS Code spirit. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: #3a3a3a; background-clip: padding-box; }
+
+.controls { display: flex; gap: 8px; }
+.controls button { flex: 1; font-size: 12px; }
+.conn { color: var(--dim); font-size: 11px; }
+.conn.live { color: var(--status); }
+.conn.dead { color: var(--human); }
+.build { color: var(--faint); font-size: 11px; font-family: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, monospace; }
+
+button
+{
+    background: var(--panel-3);
+    color: var(--text);
+    border: 1px solid var(--line-2);
+    border-radius: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 500;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+button:hover { background: #262626; border-color: #3a3a3a; }
+button:active { background: #1a1a1a; }
+button.primary
+{
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+button.primary:hover { background: #2f74e0; border-color: #2f74e0; }
+button.danger:hover { border-color: var(--human); color: #ff8a8a; background: rgba(239, 68, 68, 0.08); }
+
+.banner
+{
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+/* `display: flex` above beats the UA stylesheet's [hidden] rule, so an inactive
+   banner would stay on screen without this. */
+.banner[hidden] { display: none; }
+
+.banner.standdown { background: rgba(245, 158, 11, 0.12); color: #fbbf24; border-bottom-color: rgba(245, 158, 11, 0.25); }
+.banner.recess { background: rgba(59, 130, 246, 0.12); color: #93c5fd; border-bottom-color: rgba(59, 130, 246, 0.25); }
+.banner button { padding: 3px 10px; font-size: 12px; }
+button.recess:hover { border-color: var(--decision); color: var(--decision); background: rgba(245, 158, 11, 0.08); }
+button.recess.on { border-color: var(--decision); color: var(--decision); }
+
+main { flex: 1; display: flex; min-height: 0; }
+
+aside
+{
+    width: 280px;
+    min-width: 280px;
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+    overflow-y: auto;
+    padding: 14px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+aside section { margin-bottom: 18px; }
+aside h2
+{
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--faint);
+    margin: 0 0 6px 8px;
+    font-weight: 600;
+}
+
+.status-bar
+{
+    margin-top: auto;
+    padding: 10px 8px 0;
+    border-top: 1px solid var(--line);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+}
+
+ul { list-style: none; margin: 0; padding: 0; }
+
+.rooms li,
+.dms li
+{
+    padding: 6px 8px;
+    border-radius: 6px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    color: var(--dim);
+    transition: background 0.1s, color 0.1s;
+}
+
+.rooms li:hover,
+.dms li:hover { background: var(--panel-2); color: var(--text); }
+.rooms li.active,
+.dms li.active { background: var(--accent-soft); color: #fff; }
+.rooms li.active .name,
+.dms li.active .name { color: #fff; }
+
+.rooms li .name,
+.dms li .name { font-weight: 500; }
+.rooms li .meta,
+.dms li .meta { color: var(--faint); font-size: 11px; white-space: nowrap; }
+.rooms li.unread .name { color: var(--decision); font-weight: 600; }
+.dms li.unread .name { color: var(--human); font-weight: 600; }
+.dms li.active { box-shadow: inset 2px 0 0 var(--accent); }
+
+.dms li .presence
+{
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.dms li .presence.online { background: #4ade80; }
+.dms li .presence.offline { background: #6b7280; }
+.dms li.offline .name { opacity: 0.6; }
+.dms li.me { cursor: default; opacity: 0.7; }
+.dms li.me:hover { background: transparent; }
+.rooms li.active { box-shadow: inset 2px 0 0 var(--accent); }
+
+.chat { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
+
+.toolbar
+{
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--line);
+    color: var(--dim);
+    font-size: 12px;
+    background: var(--panel);
+}
+
+.toolbar input[type="search"]
+{
+    background: var(--input-bg);
+    border: 1px solid var(--line-2);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 5px 10px;
+    font: inherit;
+    width: 240px;
+    outline: none;
+    transition: border-color 0.12s, box-shadow 0.12s;
+}
+
+.toolbar input[type="search"]::placeholder { color: var(--faint); }
+.toolbar input[type="search"]:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+
+.toolbar label { display: flex; align-items: center; gap: 7px; cursor: pointer; user-select: none; }
+.count { margin-left: auto; color: var(--faint); }
+#menu { display: none; font-size: 15px; padding: 4px 10px; }
+
+/* Toggle-switch checkboxes, Devin-style. */
+input[type="checkbox"]
+{
+    appearance: none;
+    -webkit-appearance: none;
+    width: 30px;
+    height: 17px;
+    border-radius: 999px;
+    background: #2a2a2a;
+    border: 1px solid var(--line-2);
+    cursor: pointer;
+    position: relative;
+    flex-shrink: 0;
+    margin: 0;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+input[type="checkbox"]::after
+{
+    content: "";
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: #8f8f8f;
+    transition: transform 0.15s, background 0.15s;
+}
+
+input[type="checkbox"]:hover { border-color: #3a3a3a; }
+input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
+input[type="checkbox"]:checked::after { transform: translateX(13px); background: #fff; }
+
+.messages
+{
+    list-style: none;
+    margin: 0;
+    padding: 16px 20px;
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.msg
+{
+    padding: 6px 0;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.msg .when { color: var(--faint); font-size: 11px; padding-top: 3px; min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+.msg .body { min-width: 0; max-width: 72%; }
+.msg .who { font-weight: 600; font-size: 12.5px; }
+.msg .who.jobs-a { color: #60a5fa; }
+.msg .who.jobs-b { color: #34d399; }
+.msg .who.jobs-c { color: #c084fc; }
+.msg .who.cet { color: #f87171; }
+
+.msg .badge
+{
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 7px;
+    border-radius: 999px;
+    margin-left: 7px;
+    vertical-align: middle;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.msg .badge.decision { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+.msg .badge.status { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
+.msg .tag { color: var(--faint); font-size: 11px; margin-left: 7px; }
+.msg .text { white-space: pre-wrap; word-wrap: break-word; margin-top: 3px; color: #d4d4d4; }
+.msg .text code, .msg .text pre
+{
+    background: var(--panel-3);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-family: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, monospace;
+    font-size: 12px;
+}
+.msg.dm .text { color: #c7d2fe; }
+.msg.system { color: var(--dim); font-style: italic; }
+
+/* My messages: right-aligned bubble. Others: left-aligned. */
+.msg.me { flex-direction: row-reverse; }
+.msg.me .when { text-align: left; }
+.msg.me .body { text-align: right; }
+.msg.me .text
+{
+    display: inline-block;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 12px 12px 2px 12px;
+    padding: 7px 12px;
+    text-align: left;
+}
+.msg.me .text code, .msg.me .text pre { background: rgba(0, 0, 0, 0.25); border-color: transparent; color: #fff; }
+.msg.me .tag,
+.msg.me .badge { margin-left: 0; margin-right: 7px; }
+.msg:not(.me) .text
+{
+    display: inline-block;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 12px 12px 12px 2px;
+    padding: 7px 12px;
+}
+
+.msg.ping
+{
+    background: rgba(239, 68, 68, 0.06);
+    border-radius: 8px;
+    padding-left: 10px;
+    box-shadow: inset 2px 0 0 var(--human);
+}
+
+.composer
+{
+    border-top: 1px solid var(--line);
+    padding: 12px 16px 14px;
+    background: var(--panel);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.composer-row { display: flex; align-items: center; gap: 10px; }
+
+select, textarea
+{
+    background: var(--input-bg);
+    border: 1px solid var(--line-2);
+    border-radius: 8px;
+    color: var(--text);
+    font: inherit;
+    padding: 8px 10px;
+    outline: none;
+    transition: border-color 0.12s, box-shadow 0.12s;
+}
+
+select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+select { border-radius: 6px; }
+
+textarea { resize: none; width: 100%; }
+textarea::placeholder { color: var(--faint); }
+.hint { color: var(--dim); font-size: 12px; }
+
+.composer-input { position: relative; }
+
+/* Where the next message goes. The DM state is deliberately loud: a seat list is
+   one click away and a quiet select is how you send a private line to the room. */
+.compose-mode
+{
+    font-size: 12px;
+    color: var(--dim);
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel-2);
+}
+
+.compose-mode strong { color: var(--text); font-weight: 600; }
+.compose-mode.dm { border-color: rgba(250, 204, 21, 0.4); color: #fde68a; background: rgba(250, 204, 21, 0.08); }
+.compose-mode.dm strong { color: #facc15; }
+.compose-mode button
+{
+    margin-left: 10px;
+    padding: 2px 8px;
+    font-size: 11px;
+    background: transparent;
+}
+
+.mentions
+{
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    margin-bottom: 6px;
+    min-width: 240px;
+    max-height: 200px;
+    overflow-y: auto;
+    background: var(--panel-3);
+    border: 1px solid var(--line-2);
+    border-radius: 8px;
+    padding: 4px;
+    z-index: 10;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* `display: block` below would beat the UA stylesheet's [hidden] rule. */
+.mentions[hidden] { display: none; }
+
+.mentions li
+{
+    padding: 5px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.mentions li .meta { color: var(--faint); font-size: 12px; }
+.mentions li.active { background: var(--accent-soft); }
+.mentions li .who { font-weight: 600; }
+.mentions li .who.jobs-a { color: #60a5fa; }
+.mentions li .who.jobs-b { color: #34d399; }
+.mentions li .who.jobs-c { color: #c084fc; }
+.mentions li .who.cet { color: #f87171; }
+.mentions li .who.everyone { color: var(--decision); }
+
+.msg .text .mention { color: #60a5fa; font-weight: 600; }
+.msg .text .mention.you { color: #f87171; }
+.msg .text .mention.everyone { color: var(--decision); }
+
+.toast
+{
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    max-width: 380px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: var(--panel-3);
+    border: 1px solid var(--line-2);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+    font-size: 13px;
+    z-index: 20;
+}
+
+.toast[hidden] { display: none; }
+.toast.bad { border-color: rgba(239, 68, 68, 0.5); color: #fca5a5; }
+.toast.good { border-color: rgba(34, 197, 94, 0.5); color: #86efac; }
+
+.dialog
+{
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--line-2);
+    border-radius: 12px;
+    padding: 20px;
+    width: min(520px, 90vw);
+    font: inherit;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+
+.dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+.dialog h2 { font-size: 15px; margin: 0 0 8px; font-weight: 600; }
+.dialog-lede { color: var(--dim); font-size: 13px; margin: 0 0 12px; line-height: 1.5; }
+.dialog textarea { width: 100%; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.dialog-actions button:last-child
+{
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #fff;
+}
+.dialog-actions button:last-child:hover { background: #2f74e0; border-color: #2f74e0; }
+
+/* Narrow screens: the sidebar becomes a slide-over drawer (☰ button in the
+   toolbar) so the chat itself gets the full width. */
+@media (max-width: 780px)
+{
+    #menu { display: inline-block; }
+
+    aside
+    {
+        position: fixed;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        z-index: 40;
+        transform: translateX(-105%);
+        transition: transform 0.18s ease;
+        box-shadow: 0 0 48px rgba(0, 0, 0, 0.7);
+    }
+
+    body.sidebar-open aside { transform: none; }
+
+    .msg .body { max-width: 88%; }
+    .toolbar { flex-wrap: wrap; gap: 10px; }
+    .toolbar input[type="search"] { order: 6; width: 100%; }
+}

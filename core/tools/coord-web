@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Team chat UI — cet's seat on the jobs bus.
+#
+#   tools/coord-web                 start the chat UI (defaults: 127.0.0.1:7777, seat $USER)
+#   tools/coord-web --port 8080     somewhere else
+#   tools/coord-web --restart       kill the listener on the port and relaunch detached
+#   tools/coord-web --stand-down    release the never-end stop hook so seats can close turns
+#   tools/coord-web --resume        put the team back in the loop
+#
+# The page also has the recess button (stop the team and hold a recess) and the
+# stand-down toggle; tools/coord-recess does the same thing from a shell.
+#
+# Everything after the flags below is passed through to the server.
+
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+stand_down="$root/.devin/collaboration/stand-down"
+restart=0
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --stand-down)
+            mkdir -p "$(dirname "$stand_down")"
+            printf '%s — stand-down requested from the command line\n' "$(date -Iseconds)" > "$stand_down"
+            echo "stand-down active: $stand_down"
+            shift
+            ;;
+        --resume)
+            rm -f "$stand_down"
+            echo "stand-down lifted"
+            shift
+            ;;
+        --restart)
+            restart=1
+            shift
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+if [ "$restart" -eq 1 ]; then
+    port="${JOBS_CHAT_PORT:-7778}"
+    prev=""
+    for arg in "$@"; do
+        case "$arg" in --port=*) port="${arg#--port=}" ;; esac
+        [ "$prev" = "--port" ] && port="$arg"
+        prev="$arg"
+    done
+    pid="$(ss -tlnpH 2>/dev/null | awk -v port=":$port" '$4 ~ port"$"' | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2 || true)"
+    if [ -n "$pid" ]; then
+        kill "$pid"
+        for _ in $(seq 1 25); do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 0.2
+        done
+    fi
+    mkdir -p "$root/.devin/agent-coord/state"
+    setsid nohup node "$root/.devin/chat/server.mjs" "$@" >>"$root/.devin/agent-coord/state/chat-server.log" 2>&1 &
+    echo "coord-web restarted detached on port $port (pid $!), log: .devin/agent-coord/state/chat-server.log"
+    exit 0
+fi
+
+if [ -f "$stand_down" ] && [ $# -eq 0 ]; then
+    echo "note: stand-down is active; seats may end their turns until you run --resume" >&2
+fi
+
+exec node "$root/.devin/chat/server.mjs" "$@"
